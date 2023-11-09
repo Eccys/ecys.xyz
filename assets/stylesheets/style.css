@@ -95,12 +95,21 @@ i {
     padding-right: .2rem
 }
 
+.fa {
+    color: var(--icons);
+    transition: .3s ease-in
+}
+
 .fa-brands {
     color: var(--icons);
     transition: .3s ease-in
 }
 
 .fa-brands:hover {
+    color: var(--accent)
+}
+
+.fa:hover {
     color: var(--accent)
 }
 
