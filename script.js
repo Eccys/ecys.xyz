@@ -59,8 +59,9 @@ document.addEventListener('DOMContentLoaded', function() {
             });
     };
 
-    fetchAndDisplayPost();
-
-    setInterval(fetchAndDisplayPost, 15000);
+    setTimeout(() => {
+        fetchAndDisplayPost();
+        setInterval(fetchAndDisplayPost, 15000);
+    }, 2000);
 });
 
