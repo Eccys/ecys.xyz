@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', function() {
-    const endpoint = 'https://www.reddit.com/r/showerthoughts/top/.json?t=all&limit=100';
+    const endpoint = '/api/reddit-facts?limit=100&t=all';
     const factElement = document.getElementById('randomFact');
     const factLink = document.getElementById('randomFactLink');
     let lastPosts = [];
@@ -19,7 +19,13 @@ document.addEventListener('DOMContentLoaded', function() {
     // Get top posts from reddit
     const fetchAndDisplayPost = () => {
         fetch(endpoint)
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`Request failed with status ${response.status}`);
+                }
+
+                return response.json();
+            })
             .then(data => {
                 let posts = data.data.children.map(child => child.data);
 
