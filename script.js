@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', function() {
-    const endpoint = '/api/reddit-facts?limit=100&t=all';
+            const endpoint = '/api/reddit-facts?limit=100&t=all';
     const factElement = document.getElementById('randomFact');
     const factLink = document.getElementById('randomFactLink');
     let lastPosts = [];
