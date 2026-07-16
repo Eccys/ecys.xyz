@@ -5,7 +5,7 @@ document.addEventListener("DOMContentLoaded", function () {
   var pool = [];
   var busy = false;
   var firstSwap = true;
-  var FADE_MS = 1000;
+  var FADE_MS = 5000;
 
   function setFact(text, href) {
     var words = String(text).split(" ");
