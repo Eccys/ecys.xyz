@@ -4,7 +4,6 @@ document.addEventListener("DOMContentLoaded", function () {
   var lastIds = [];
   var pool = [];
   var busy = false;
-  var firstSwap = true;
   var FADE_MS = 5000;
 
   function setFact(text, href) {
@@ -12,7 +11,6 @@ document.addEventListener("DOMContentLoaded", function () {
     if (words.length > 16) {
       factElement.innerHTML = words.join(" ").replace(/(.{48}\S*)\s+/g, "$1<br />");
     } else {
-      // Prefer textContent so we don't rebuild DOM mid-transition unnecessarily
       factElement.textContent = text;
     }
     if (href) factLink.href = href;
@@ -20,7 +18,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
   function afterTransition(el, cb) {
     var done = false;
-    var timer = setTimeout(finish, FADE_MS + 50);
+    var timer = setTimeout(finish, FADE_MS + 80);
     function finish() {
       if (done) return;
       done = true;
@@ -44,7 +42,6 @@ document.addEventListener("DOMContentLoaded", function () {
       choices = pool.slice();
     }
 
-    // Pick a non-overlong title without recursive re-entry
     var fact = null;
     var guard = 0;
     while (guard++ < choices.length + 5) {
@@ -53,11 +50,8 @@ document.addEventListener("DOMContentLoaded", function () {
         fact = candidate;
         break;
       }
-      // drop bad picks from this round
       choices = choices.filter(function (c) { return c.id !== candidate.id; });
-      if (!choices.length) {
-        choices = pool.slice();
-      }
+      if (!choices.length) choices = pool.slice();
     }
     if (!fact) return;
 
@@ -65,18 +59,14 @@ document.addEventListener("DOMContentLoaded", function () {
     if (lastIds.length > 12) lastIds.shift();
 
     busy = true;
-
-    // First swap: fade out placeholder once, then show first fact (no double animation)
     factElement.classList.add("is-fading");
 
     afterTransition(factElement, function () {
       setFact(fact.title, fact.url);
-      // Force style flush so the next opacity transition always runs cleanly
       void factElement.offsetWidth;
       factElement.classList.remove("is-fading");
       afterTransition(factElement, function () {
         busy = false;
-        firstSwap = false;
       });
     });
   }
