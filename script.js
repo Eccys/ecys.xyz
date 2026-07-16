@@ -1,73 +1,122 @@
-document.addEventListener('DOMContentLoaded', function() {
-                const endpoint = 'https://api.ecys.xyz/api/reddit-facts?limit=100&t=all';
-    const factElement = document.getElementById('randomFact');
-    const factLink = document.getElementById('randomFactLink');
-    let lastPosts = [];
+document.addEventListener("DOMContentLoaded", function () {
+  // Primary: same-origin static facts (reliable on GitHub Pages).
+  // Secondary: Cloudflare worker proxy (may fail if Reddit blocks datacenter IPs).
+  const endpoints = [
+    "/facts.json",
+    "https://api.ecys.xyz/api/reddit-facts?limit=100&t=all",
+  ];
+  const factElement = document.getElementById("randomFact");
+  const factLink = document.getElementById("randomFactLink");
+  let lastPosts = [];
+  let pool = [];
 
-    const updateFact = (randomFact, postUrl) => {
-        const words = randomFact.split(' ');
+  const updateFact = (randomFact, postUrl) => {
+    const words = randomFact.split(" ");
+    if (words.length > 16) {
+      factElement.innerHTML = words
+        .join(" ")
+        .replace(/(.{48}\S*)\s+/g, "$1<br />");
+    } else {
+      factElement.innerText = randomFact;
+    }
+    if (postUrl) {
+      factLink.href = postUrl;
+      factLink.removeAttribute("aria-disabled");
+    }
+  };
 
-        if (words.length > 16) {
-            factElement.innerHTML = words.join(' ').replace(/(.{48}\S*)\s+/g, '$1<br />');
-        } else {
-            factElement.innerText = randomFact;
+  const normalizePosts = (data) => {
+    if (Array.isArray(data)) {
+      return data.map((item, i) => ({
+        id: item.id || String(i),
+        title: item.title || item.fact || String(item),
+        permalink: item.permalink || item.url || null,
+      }));
+    }
+    if (data && data.data && Array.isArray(data.data.children)) {
+      return data.data.children.map((child) => child.data);
+    }
+    if (data && Array.isArray(data.facts)) {
+      return data.facts.map((item, i) => ({
+        id: item.id || String(i),
+        title: item.title || item.fact || String(item),
+        permalink: item.permalink || item.url || null,
+      }));
+    }
+    return [];
+  };
+
+  const fetchJson = async (url) => {
+    const response = await fetch(url, { credentials: "omit" });
+    if (!response.ok) {
+      throw new Error(`Request failed with status ${response.status}`);
+    }
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("text/html")) {
+      throw new Error("Endpoint returned HTML instead of JSON");
+    }
+    return response.json();
+  };
+
+  const loadPool = async () => {
+    let lastError = null;
+    for (const url of endpoints) {
+      try {
+        const data = await fetchJson(url);
+        const posts = normalizePosts(data).filter(
+          (post) => post && post.title && post.title.split(" ").length <= 30
+        );
+        if (posts.length) {
+          pool = posts;
+          return;
         }
+      } catch (error) {
+        lastError = error;
+        console.warn("Fact source failed:", url, error);
+      }
+    }
+    throw lastError || new Error("No fact sources available");
+  };
 
-        factLink.href = postUrl;
-    };
+  const displayPost = () => {
+    if (!pool.length) {
+      factElement.innerText = "No new facts available.";
+      return;
+    }
 
-    // Get top posts from reddit
-    const fetchAndDisplayPost = () => {
-        fetch(endpoint)
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`Request failed with status ${response.status}`);
-                }
+    let posts = pool.filter((post) => !lastPosts.includes(post.id));
+    if (!posts.length) {
+      lastPosts = [];
+      posts = pool.slice();
+    }
 
-                return response.json();
-            })
-            .then(data => {
-                let posts = data.data.children.map(child => child.data);
+    const post = posts[Math.floor(Math.random() * posts.length)];
+    const randomFact = post.title;
+    const postUrl = post.permalink
+      ? post.permalink.startsWith("http")
+        ? post.permalink
+        : `https://www.reddit.com${post.permalink}`
+      : "https://ecys.xyz/";
 
-                // Filters to not repeat posts & ignore long ones
-                posts = posts.filter(post => post.title.split(' ').length <= 30);
-                posts = posts.filter(post => !lastPosts.includes(post.id));
+    lastPosts.push(post.id);
+    if (lastPosts.length > 10) lastPosts.shift();
 
-                if (posts.length === 0) {
-                    factElement.innerText = 'No new facts available.';
-                    return;
-                }
-
-                const post = posts[Math.floor(Math.random() * posts.length)];
-                const randomFact = post.title;
-                const postUrl = `https://www.reddit.com${post.permalink}`;
-
-                lastPosts.push(post.id);
-                if (lastPosts.length > 10) {
-                    lastPosts.shift();
-                }
-
-                factElement.classList.add('fade-out');
-
-                setTimeout(() => {
-                    updateFact(randomFact, postUrl);
-                    factElement.classList.remove('fade-out');
-                    factElement.classList.add('fade-in');
-
-                    setTimeout(() => {
-                        factElement.classList.remove('fade-in');
-                    }, 1000); 
-                }, 1000); 
-            }) 
-            .catch(error => {
-                console.error('Error fetching data:', error);
-                factElement.innerText = 'Could not load a fact.';
-            });
-    };
-
+    factElement.classList.add("fade-out");
     setTimeout(() => {
-        fetchAndDisplayPost();
-        setInterval(fetchAndDisplayPost, 15000);
-    }, 2000);
-});
+      updateFact(randomFact, postUrl);
+      factElement.classList.remove("fade-out");
+      factElement.classList.add("fade-in");
+      setTimeout(() => factElement.classList.remove("fade-in"), 1000);
+    }, 400);
+  };
 
+  loadPool()
+    .then(() => {
+      displayPost();
+      setInterval(displayPost, 15000);
+    })
+    .catch((error) => {
+      console.error("Error loading facts:", error);
+      factElement.innerText = "Could not load a fact.";
+    });
+});
