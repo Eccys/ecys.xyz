@@ -33,7 +33,6 @@ html {
     color: var(--accent);
 }
 
-/* Single opacity transition — no competing keyframe animations */
 #randomFact {
     opacity: 1;
     transition: opacity 5s ease;
