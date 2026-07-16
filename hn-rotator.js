@@ -3,38 +3,82 @@ document.addEventListener("DOMContentLoaded", function () {
   var factLink = document.getElementById("randomFactLink");
   var lastIds = [];
   var pool = [];
+  var busy = false;
+  var firstSwap = true;
+  var FADE_MS = 450;
 
   function setFact(text, href) {
     var words = String(text).split(" ");
     if (words.length > 16) {
       factElement.innerHTML = words.join(" ").replace(/(.{48}\S*)\s+/g, "$1<br />");
     } else {
-      factElement.innerText = text;
+      // Prefer textContent so we don't rebuild DOM mid-transition unnecessarily
+      factElement.textContent = text;
     }
     if (href) factLink.href = href;
   }
 
+  function afterTransition(el, cb) {
+    var done = false;
+    var timer = setTimeout(finish, FADE_MS + 50);
+    function finish() {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      el.removeEventListener("transitionend", onEnd);
+      cb();
+    }
+    function onEnd(e) {
+      if (e.target !== el || e.propertyName !== "opacity") return;
+      finish();
+    }
+    el.addEventListener("transitionend", onEnd);
+  }
+
   function showNext() {
-    if (!pool.length) return;
+    if (busy || !pool.length) return;
+
     var choices = pool.filter(function (f) { return lastIds.indexOf(f.id) === -1; });
     if (!choices.length) {
       lastIds = [];
       choices = pool.slice();
     }
-    var fact = choices[Math.floor(Math.random() * choices.length)];
+
+    // Pick a non-overlong title without recursive re-entry
+    var fact = null;
+    var guard = 0;
+    while (guard++ < choices.length + 5) {
+      var candidate = choices[Math.floor(Math.random() * choices.length)];
+      if (String(candidate.title).split(" ").length <= 40) {
+        fact = candidate;
+        break;
+      }
+      // drop bad picks from this round
+      choices = choices.filter(function (c) { return c.id !== candidate.id; });
+      if (!choices.length) {
+        choices = pool.slice();
+      }
+    }
+    if (!fact) return;
+
     lastIds.push(fact.id);
     if (lastIds.length > 12) lastIds.shift();
-    if (String(fact.title).split(" ").length > 40) {
-      showNext();
-      return;
-    }
-    factElement.classList.add("fade-out");
-    setTimeout(function () {
+
+    busy = true;
+
+    // First swap: fade out placeholder once, then show first fact (no double animation)
+    factElement.classList.add("is-fading");
+
+    afterTransition(factElement, function () {
       setFact(fact.title, fact.url);
-      factElement.classList.remove("fade-out");
-      factElement.classList.add("fade-in");
-      setTimeout(function () { factElement.classList.remove("fade-in"); }, 800);
-    }, 300);
+      // Force style flush so the next opacity transition always runs cleanly
+      void factElement.offsetWidth;
+      factElement.classList.remove("is-fading");
+      afterTransition(factElement, function () {
+        busy = false;
+        firstSwap = false;
+      });
+    });
   }
 
   function fetchJson(urls) {
@@ -50,7 +94,6 @@ document.addEventListener("DOMContentLoaded", function () {
     return next();
   }
 
-  // HN: top 10 by points in last 7 days
   function loadHackerNewsWeekTop10() {
     var weekAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
     var url =
@@ -78,7 +121,6 @@ document.addEventListener("DOMContentLoaded", function () {
       });
   }
 
-  // Cached r/showerthoughts top 10 (static JSON on repo; live Reddit blocked)
   function loadShowerthoughtsCache() {
     return fetchJson([
       "/showerthoughts-cache.json",
@@ -107,7 +149,9 @@ document.addEventListener("DOMContentLoaded", function () {
     if (!pool.length) throw new Error("empty pool");
     console.info("Footer pool HN=" + hn.length + " showerthoughts=" + st.length);
     showNext();
-    setInterval(showNext, 15000);
+    setInterval(function () {
+      if (!busy) showNext();
+    }, 15000);
   }).catch(function (err) {
     console.error("Error loading footer items:", err);
   });
