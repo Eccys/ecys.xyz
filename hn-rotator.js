@@ -25,6 +25,12 @@ document.addEventListener("DOMContentLoaded", function () {
     lastIds.push(fact.id);
     if (lastIds.length > 12) lastIds.shift();
 
+    // same soft filter as before: skip overly long titles in display path
+    if (String(fact.title).split(" ").length > 40) {
+      showNext();
+      return;
+    }
+
     factElement.classList.add("fade-out");
     setTimeout(function () {
       setFact(fact.title, fact.url);
@@ -34,84 +40,78 @@ document.addEventListener("DOMContentLoaded", function () {
     }, 300);
   }
 
-  function normalizeLocal(data) {
-    var list = Array.isArray(data) ? data : (data && data.facts) || [];
-    return list.map(function (item, i) {
-      return {
-        id: item.id || ("local-" + i),
-        title: item.title || item.fact || String(item),
-        url: item.url || item.permalink || "https://ecys.xyz/",
-        score: item.score || 0
-      };
-    }).filter(function (f) { return f.title && f.title.split(" ").length <= 40; });
-  }
+  // Hacker News: top 10 by points, created in the last 7 days (Algolia HN API)
+  function loadHackerNewsWeekTop10() {
+    var weekAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
+    var url =
+      "https://hn.algolia.com/api/v1/search?tags=story&hitsPerPage=50&numericFilters=" +
+      encodeURIComponent("created_at_i>" + weekAgo);
 
-  // Hacker News public API (no auth). Top stories by score.
-  function loadFromHackerNews() {
-    return fetch("https://hacker-news.firebaseio.com/v0/topstories.json", {
-      credentials: "omit",
-      cache: "no-store"
-    })
+    return fetch(url, { credentials: "omit", cache: "no-store" })
       .then(function (res) {
-        if (!res.ok) throw new Error("HN topstories HTTP " + res.status);
+        if (!res.ok) throw new Error("HN HTTP " + res.status);
         return res.json();
       })
-      .then(function (ids) {
-        var top = (ids || []).slice(0, 30);
-        return Promise.all(
-          top.map(function (id) {
-            return fetch("https://hacker-news.firebaseio.com/v0/item/" + id + ".json", {
-              credentials: "omit",
-              cache: "no-store"
-            }).then(function (r) {
-              if (!r.ok) return null;
-              return r.json();
-            });
-          })
-        );
-      })
-      .then(function (items) {
-        var stories = (items || [])
-          .filter(function (it) {
-            return it && it.type === "story" && it.title && typeof it.score === "number";
-          })
-          .sort(function (a, b) { return b.score - a.score; })
-          .slice(0, 20)
-          .map(function (it) {
+      .then(function (data) {
+        var hits = (data && data.hits) || [];
+        return hits
+          .filter(function (h) { return h && h.title && typeof h.points === "number"; })
+          .sort(function (a, b) { return b.points - a.points; })
+          .slice(0, 10)
+          .map(function (h) {
             return {
-              id: "hn-" + it.id,
-              title: it.title + " (" + it.score + " pts)",
-              url: it.url || ("https://news.ycombinator.com/item?id=" + it.id),
-              score: it.score
+              id: "hn-" + h.objectID,
+              title: h.title + " (" + h.points + " pts)",
+              url: h.url || ("https://news.ycombinator.com/item?id=" + h.objectID),
+              score: h.points,
+              source: "hn"
             };
           });
-        if (!stories.length) throw new Error("no HN stories");
-        return stories;
       });
   }
 
-  function loadFromLocalFacts() {
-    return fetch("/facts.json", { credentials: "omit", cache: "no-store" })
+  // Reddit r/showerthoughts top 10 — served from on-site cache (live Reddit blocked)
+  function loadShowerthoughtsCache() {
+    return fetch("/showerthoughts-cache.json", { credentials: "omit", cache: "no-store" })
       .then(function (res) {
-        if (!res.ok) throw new Error("facts.json HTTP " + res.status);
+        if (!res.ok) throw new Error("showerthoughts-cache HTTP " + res.status);
         return res.json();
       })
-      .then(normalizeLocal);
+      .then(function (data) {
+        var list = (data && data.thoughts) || [];
+        return list.slice(0, 10).map(function (t, i) {
+          return {
+            id: "st-" + (t.id || i),
+            title: t.title,
+            url: t.url || "https://www.reddit.com/r/showerthoughts/",
+            score: t.score || 0,
+            source: "reddit"
+          };
+        }).filter(function (f) { return f.title; });
+      });
   }
 
-  // Prefer live HN top posts; fall back to local facts.json
-  loadFromHackerNews()
-    .catch(function (err) {
-      console.warn("HN failed, using local facts:", err);
-      return loadFromLocalFacts();
+  Promise.all([
+    loadHackerNewsWeekTop10().catch(function (e) {
+      console.warn("HN week top failed:", e);
+      return [];
+    }),
+    loadShowerthoughtsCache().catch(function (e) {
+      console.warn("Showerthoughts cache failed:", e);
+      return [];
     })
-    .then(function (stories) {
-      pool = stories;
-      if (!pool.length) throw new Error("empty pool");
+  ])
+    .then(function (parts) {
+      var hn = parts[0] || [];
+      var st = parts[1] || [];
+      // Prefer HN week top 10, then cached showerthoughts top 10 — same cycle/filter loop
+      pool = hn.concat(st);
+      if (!pool.length) throw new Error("no items in pool");
+      console.info("Footer pool: HN=" + hn.length + " showerthoughts=" + st.length);
       showNext();
       setInterval(showNext, 15000);
     })
     .catch(function (err) {
-      console.error("Error loading facts:", err);
+      console.error("Error loading footer items:", err);
     });
 });
