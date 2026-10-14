@@ -17,7 +17,7 @@ export default {
     } catch (e) {
       return this.cors(
         request,
-        new Response(JSON.stringify({ error: e.message }), {
+        new Response(JSON.stringify({ error: e && e.message ? e.message : "Upstream error" }), {
           status: 502,
           headers: { "Content-Type": "application/json" }
         })
@@ -33,14 +33,14 @@ export default {
       encodeURIComponent("created_at_i>" + weekAgo);
 
     const cache = caches.default;
-    const key = new Request("https://cache.ecys.xyz/hn-week-top10");
+    const key = new Request(`https://cache.ecys.xyz/hn-week-top10?limit=${limit}`);
     let hit = await cache.match(key);
     if (hit) return hit;
 
     const res = await fetch(api);
     if (!res.ok) throw new Error("HN " + res.status);
     const data = await res.json();
-    const children = (data.hits || [])
+    const children = ((data && data.hits) || [])
       .filter((h) => h && h.title && typeof h.points === "number")
       .sort((a, b) => b.points - a.points)
       .slice(0, limit)
@@ -59,7 +59,9 @@ export default {
       status: 200,
       headers: { "Content-Type": "application/json", "Cache-Control": "public, max-age=600" }
     });
-    ctx.waitUntil(cache.put(key, out.clone()));
+    if (ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil(cache.put(key, out.clone()));
+    }
     return out;
   },
 
@@ -75,8 +77,8 @@ export default {
       "https://api.pullpush.io/reddit/search/submission/?subreddit=showerthoughts&sort=desc&sort_type=score&size=10&after=" +
       weekAgo;
     let res = await fetch(api, { headers: { "User-Agent": "ecys.xyz-worker/1.0" } });
-    let data = res.ok ? await res.json() : { data: [] };
-    if (!data.data || !data.data.length) {
+    let data = res.ok ? await res.json().catch(() => ({ data: [] })) : { data: [] };
+    if (!data || !Array.isArray(data.data) || !data.data.length) {
       api =
         "https://api.pullpush.io/reddit/search/submission/?subreddit=showerthoughts&sort=desc&sort_type=score&size=10";
       res = await fetch(api, { headers: { "User-Agent": "ecys.xyz-worker/1.0" } });
@@ -84,13 +86,18 @@ export default {
       data = await res.json();
     }
 
-    const thoughts = (data.data || []).slice(0, 10).map((p) => ({
-      id: p.id,
-      title: p.title,
-      score: p.score,
-      url: "https://www.reddit.com" + (p.permalink || ""),
-      created_utc: p.created_utc
-    }));
+    const thoughts = ((data && data.data) || [])
+      .filter((p) => p && p.title)
+      .slice(0, 10)
+      .map((p) => ({
+        id: p.id,
+        title: p.title,
+        score: p.score || 0,
+        url: p.permalink
+          ? (/^https?:\/\//i.test(p.permalink) ? p.permalink : "https://www.reddit.com" + p.permalink)
+          : "https://www.reddit.com/r/showerthoughts/",
+        created_utc: p.created_utc
+      }));
 
     const body = JSON.stringify({
       source: "r/showerthoughts",
@@ -102,7 +109,9 @@ export default {
       headers: { "Content-Type": "application/json", "Cache-Control": "public, max-age=86400" }
     });
     // long cache so we keep showerthoughts even when upstream fails later
-    ctx.waitUntil(cache.put(key, out.clone()));
+    if (ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil(cache.put(key, out.clone()));
+    }
     return out;
   },
 
