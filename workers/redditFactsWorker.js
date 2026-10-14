@@ -59,7 +59,7 @@ export default {
       status: 200,
       headers: { "Content-Type": "application/json", "Cache-Control": "public, max-age=600" }
     });
-    if (ctx && typeof ctx.waitUntil === "function") {
+    if (children.length > 0 && ctx && typeof ctx.waitUntil === "function") {
       ctx.waitUntil(cache.put(key, out.clone()));
     }
     return out;
@@ -94,7 +94,9 @@ export default {
         title: p.title,
         score: p.score || 0,
         url: p.permalink
-          ? (/^https?:\/\//i.test(p.permalink) ? p.permalink : "https://www.reddit.com" + p.permalink)
+          ? (/^https?:\/\//i.test(p.permalink)
+              ? p.permalink
+              : "https://www.reddit.com" + (String(p.permalink).startsWith("/") ? p.permalink : "/" + p.permalink))
           : "https://www.reddit.com/r/showerthoughts/",
         created_utc: p.created_utc
       }));
@@ -108,8 +110,8 @@ export default {
       status: 200,
       headers: { "Content-Type": "application/json", "Cache-Control": "public, max-age=86400" }
     });
-    // long cache so we keep showerthoughts even when upstream fails later
-    if (ctx && typeof ctx.waitUntil === "function") {
+    // long cache so we keep showerthoughts even when upstream fails later (only cache non-empty results)
+    if (thoughts.length > 0 && ctx && typeof ctx.waitUntil === "function") {
       ctx.waitUntil(cache.put(key, out.clone()));
     }
     return out;

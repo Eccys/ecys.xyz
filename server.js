@@ -9,11 +9,11 @@ const port = Number(process.env.PORT) || 3000;
 const ALLOWED_TIMEFRAMES = new Set(['hour', 'day', 'week', 'month', 'year', 'all']);
 const SUBREDDIT_REGEX = /^[a-zA-Z0-9_]{1,50}$/;
 
-function loadLocalShowerthoughtsFallback() {
+function loadLocalShowerthoughtsFallback(limit = 100) {
   try {
     const raw = fs.readFileSync(path.join(__dirname, 'showerthoughts-cache.json'), 'utf8');
     const parsed = JSON.parse(raw);
-    const children = ((parsed && parsed.thoughts) || []).map((t) => ({
+    const children = ((parsed && parsed.thoughts) || []).slice(0, limit).map((t) => ({
       data: {
         id: t.id,
         title: t.title,
@@ -53,7 +53,7 @@ app.get('/api/reddit-facts', async (req, res) => {
     const data = await redditResponse.json();
     return res.json(data);
   } catch (error) {
-    const fallback = loadLocalShowerthoughtsFallback();
+    const fallback = loadLocalShowerthoughtsFallback(limit);
     if (fallback) {
       return res.json(fallback);
     }
@@ -61,17 +61,26 @@ app.get('/api/reddit-facts', async (req, res) => {
   }
 });
 
-// Prevent exposing server/worker configuration files via static middleware
+// Prevent exposing server/worker/node_modules configuration files via static middleware (case-insensitive for Windows/macOS)
 const BLOCKED_PATHS = new Set(['/server.js', '/wrangler.toml', '/package.json', '/package-lock.json']);
 app.use((req, res, next) => {
-  if (BLOCKED_PATHS.has(req.path) || req.path.startsWith('/workers/') || req.path.startsWith('/.')) {
+  let lowerPath = String(req.path || '').toLowerCase().replace(/\/+$/, '') || '/';
+  if (
+    BLOCKED_PATHS.has(lowerPath) ||
+    lowerPath === '/workers' ||
+    lowerPath.startsWith('/workers/') ||
+    lowerPath === '/node_modules' ||
+    lowerPath.startsWith('/node_modules/') ||
+    lowerPath.startsWith('/.') ||
+    lowerPath.includes('/.')
+  ) {
     return res.status(404).end();
   }
   return next();
 });
 
 // Serve static files
-app.use(express.static(path.join(__dirname)));
+app.use(express.static(path.join(__dirname), { dotfiles: 'deny' }));
 
 if (require.main === module) {
   app.listen(port, () => {
