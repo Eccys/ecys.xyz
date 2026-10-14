@@ -1,19 +1,38 @@
 document.addEventListener("DOMContentLoaded", function () {
   var factElement = document.getElementById("randomFact");
   var factLink = document.getElementById("randomFactLink");
+  if (!factElement || !factLink) return;
+
   var lastIds = [];
   var pool = [];
   var busy = false;
   var FADE_MS = 5000;
 
+  function isSafeHref(href) {
+    if (!href || typeof href !== "string") return false;
+    return /^https?:\/\//i.test(href) || href.indexOf("/") === 0;
+  }
+
   function setFact(text, href) {
-    var words = String(text).split(" ");
+    var normalized = String(text || "").trim();
+    var words = normalized ? normalized.split(/\s+/) : [];
+    factElement.textContent = "";
+
     if (words.length > 16) {
-      factElement.innerHTML = words.join(" ").replace(/(.{48}\S*)\s+/g, "$1<br />");
+      var lines = words.join(" ").replace(/(.{48}\S*)\s+/g, "$1\n").split("\n");
+      for (var i = 0; i < lines.length; i++) {
+        if (i > 0) factElement.appendChild(document.createElement("br"));
+        factElement.appendChild(document.createTextNode(lines[i]));
+      }
     } else {
-      factElement.textContent = text;
+      factElement.textContent = normalized;
     }
-    if (href) factLink.href = href;
+
+    if (isSafeHref(href)) {
+      factLink.href = href;
+    } else {
+      factLink.href = "https://ecys.xyz/";
+    }
   }
 
   function afterTransition(el, cb) {
@@ -33,26 +52,23 @@ document.addEventListener("DOMContentLoaded", function () {
     el.addEventListener("transitionend", onEnd);
   }
 
+  function isShortEnough(item) {
+    return item && item.title && String(item.title).trim().split(/\s+/).length <= 40;
+  }
+
   function showNext() {
     if (busy || !pool.length) return;
 
-    var choices = pool.filter(function (f) { return lastIds.indexOf(f.id) === -1; });
+    var eligiblePool = pool.filter(isShortEnough);
+    if (!eligiblePool.length) eligiblePool = pool.slice();
+
+    var choices = eligiblePool.filter(function (f) { return lastIds.indexOf(f.id) === -1; });
     if (!choices.length) {
       lastIds = [];
-      choices = pool.slice();
+      choices = eligiblePool.slice();
     }
 
-    var fact = null;
-    var guard = 0;
-    while (guard++ < choices.length + 5) {
-      var candidate = choices[Math.floor(Math.random() * choices.length)];
-      if (String(candidate.title).split(" ").length <= 40) {
-        fact = candidate;
-        break;
-      }
-      choices = choices.filter(function (c) { return c.id !== candidate.id; });
-      if (!choices.length) choices = pool.slice();
-    }
+    var fact = choices[Math.floor(Math.random() * choices.length)];
     if (!fact) return;
 
     lastIds.push(fact.id);
@@ -129,15 +145,37 @@ document.addEventListener("DOMContentLoaded", function () {
     });
   }
 
+  function loadFallbackFacts() {
+    return fetchJson([
+      "/facts.json",
+      "https://cdn.jsdelivr.net/gh/Eccys/ecys.xyz@main/facts.json",
+      "https://raw.githubusercontent.com/Eccys/ecys.xyz/main/facts.json"
+    ]).then(function (data) {
+      return ((data && data.facts) || []).map(function (f, i) {
+        return {
+          id: "fact-" + (f.id || i),
+          title: f.title,
+          url: f.url || "https://ecys.xyz/",
+          score: 0,
+          source: "local"
+        };
+      }).filter(function (f) { return f.title; });
+    }).catch(function () { return []; });
+  }
+
   Promise.all([
     loadHackerNewsWeekTop10().catch(function (e) { console.warn("HN failed", e); return []; }),
     loadShowerthoughtsCache().catch(function (e) { console.warn("Showerthoughts failed", e); return []; })
   ]).then(function (parts) {
     var hn = parts[0] || [];
     var st = parts[1] || [];
-    pool = hn.concat(st);
+    var combined = hn.concat(st);
+    if (combined.length) return combined;
+    return loadFallbackFacts();
+  }).then(function (items) {
+    pool = items || [];
     if (!pool.length) throw new Error("empty pool");
-    console.info("Footer pool HN=" + hn.length + " showerthoughts=" + st.length);
+    console.info("Footer pool loaded: " + pool.length + " items");
     showNext();
     setInterval(function () {
       if (!busy) showNext();
