@@ -210,7 +210,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
   function isSafeHref(href) {
     if (!href || typeof href !== "string") return false;
-    return /^https?:\/\//i.test(href) || href.indexOf("/") === 0;
+    return /^https?:\/\//i.test(href) || /^\/(?!\/)/.test(href);
   }
 
   function setFact(text, href) {
