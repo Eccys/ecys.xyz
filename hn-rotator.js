@@ -10,7 +10,8 @@ document.addEventListener("DOMContentLoaded", function () {
 
   function isSafeHref(href) {
     if (!href || typeof href !== "string") return false;
-    return /^https?:\/\//i.test(href) || /^\/(?!\/)/.test(href);
+    var trimmed = href.trim();
+    return /^https?:\/\/[^\s/$.?#].[^\s]*$/i.test(trimmed) || /^\/(?!\/)/.test(trimmed);
   }
 
   function setFact(text, href) {
@@ -29,7 +30,7 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     if (isSafeHref(href)) {
-      factLink.href = href;
+      factLink.href = href.trim();
     } else {
       factLink.href = "https://ecys.xyz/";
     }

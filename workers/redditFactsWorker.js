@@ -1,6 +1,15 @@
 export default {
   async fetch(request, env, ctx) {
     if (request.method === "OPTIONS") return this.cors(request, new Response(null, { status: 204 }));
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      return this.cors(
+        request,
+        new Response(JSON.stringify({ error: "Method not allowed" }), {
+          status: 405,
+          headers: { "Content-Type": "application/json", Allow: "GET, HEAD, OPTIONS" }
+        })
+      );
+    }
 
     const url = new URL(request.url);
     const path = url.pathname;
@@ -27,7 +36,8 @@ export default {
 
   async hnWeek(url, ctx) {
     const weekAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
-    const limit = Math.min(Math.max(parseInt(url.searchParams.get("limit") || "10", 10) || 10, 1), 10);
+    const parsedLimit = parseInt(url.searchParams.get("limit") || "10", 10);
+    const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 10) : 10;
     const api =
       "https://hn.algolia.com/api/v1/search?tags=story&hitsPerPage=50&numericFilters=" +
       encodeURIComponent("created_at_i>" + weekAgo);
@@ -35,7 +45,7 @@ export default {
     const cache = caches.default;
     const key = new Request(`https://cache.ecys.xyz/hn-week-top10?limit=${limit}`);
     let hit = await cache.match(key);
-    if (hit) return hit;
+    if (hit) return typeof hit.clone === "function" ? hit.clone() : hit;
 
     const res = await fetch(api);
     if (!res.ok) throw new Error("HN " + res.status);
@@ -69,15 +79,15 @@ export default {
     const cache = caches.default;
     const key = new Request("https://cache.ecys.xyz/showerthoughts-top10");
     let hit = await cache.match(key);
-    if (hit) return hit;
+    if (hit) return typeof hit.clone === "function" ? hit.clone() : hit;
 
     // PullPush archive (live reddit.com often 403 from cloud)
     const weekAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
     let api =
       "https://api.pullpush.io/reddit/search/submission/?subreddit=showerthoughts&sort=desc&sort_type=score&size=10&after=" +
       weekAgo;
-    let res = await fetch(api, { headers: { "User-Agent": "ecys.xyz-worker/1.0" } });
-    let data = res.ok ? await res.json().catch(() => ({ data: [] })) : { data: [] };
+    let res = await fetch(api, { headers: { "User-Agent": "ecys.xyz-worker/1.0" } }).catch(() => null);
+    let data = res && res.ok ? await res.json().catch(() => ({ data: [] })) : { data: [] };
     if (!data || !Array.isArray(data.data) || !data.data.length) {
       api =
         "https://api.pullpush.io/reddit/search/submission/?subreddit=showerthoughts&sort=desc&sort_type=score&size=10";
@@ -89,17 +99,24 @@ export default {
     const thoughts = ((data && data.data) || [])
       .filter((p) => p && p.title)
       .slice(0, 10)
-      .map((p) => ({
-        id: p.id,
-        title: p.title,
-        score: p.score || 0,
-        url: p.permalink
-          ? (/^https?:\/\//i.test(p.permalink)
-              ? p.permalink
-              : "https://www.reddit.com" + (String(p.permalink).startsWith("/") ? p.permalink : "/" + p.permalink))
-          : "https://www.reddit.com/r/showerthoughts/",
-        created_utc: p.created_utc
-      }));
+      .map((p) => {
+        const rawPermalink = typeof p.permalink === "string" ? p.permalink.trim() : "";
+        let resolvedUrl = "https://www.reddit.com/r/showerthoughts/";
+        if (rawPermalink) {
+          if (/^https?:\/\/[^\s/$.?#].[^\s]*$/i.test(rawPermalink)) {
+            resolvedUrl = rawPermalink;
+          } else if (!rawPermalink.startsWith("//")) {
+            resolvedUrl = "https://www.reddit.com" + (rawPermalink.startsWith("/") ? rawPermalink : "/" + rawPermalink);
+          }
+        }
+        return {
+          id: p.id,
+          title: p.title,
+          score: p.score || 0,
+          url: resolvedUrl,
+          created_utc: p.created_utc
+        };
+      });
 
     const body = JSON.stringify({
       source: "r/showerthoughts",
