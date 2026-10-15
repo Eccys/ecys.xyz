@@ -53,26 +53,36 @@ app.get('/api/reddit-facts', async (req, res) => {
     const data = await redditResponse.json();
     return res.json(data);
   } catch (error) {
-    const fallback = loadLocalShowerthoughtsFallback(limit);
-    if (fallback) {
-      return res.json(fallback);
+    if (rawSubreddit.toLowerCase() === 'showerthoughts') {
+      const fallback = loadLocalShowerthoughtsFallback(limit);
+      if (fallback) {
+        return res.json(fallback);
+      }
     }
     return res.status(502).json({ error: 'Failed to fetch data from Reddit' });
   }
 });
 
-// Prevent exposing server/worker/node_modules configuration files via static middleware (case-insensitive for Windows/macOS)
+// Prevent exposing server/worker/node_modules/tests configuration files via static middleware (case-insensitive & URL-decoded)
 const BLOCKED_PATHS = new Set(['/server.js', '/wrangler.toml', '/package.json', '/package-lock.json']);
 app.use((req, res, next) => {
-  let lowerPath = String(req.path || '').toLowerCase().replace(/\/+$/, '') || '/';
+  let decodedPath;
+  try {
+    decodedPath = decodeURIComponent(String(req.path || ''));
+  } catch (err) {
+    return res.status(400).end();
+  }
+  const normalizedPath = decodedPath.replace(/\\/g, '/').replace(/\/+/g, '/').toLowerCase().replace(/\/+$/, '') || '/';
   if (
-    BLOCKED_PATHS.has(lowerPath) ||
-    lowerPath === '/workers' ||
-    lowerPath.startsWith('/workers/') ||
-    lowerPath === '/node_modules' ||
-    lowerPath.startsWith('/node_modules/') ||
-    lowerPath.startsWith('/.') ||
-    lowerPath.includes('/.')
+    BLOCKED_PATHS.has(normalizedPath) ||
+    normalizedPath === '/workers' ||
+    normalizedPath.startsWith('/workers/') ||
+    normalizedPath === '/node_modules' ||
+    normalizedPath.startsWith('/node_modules/') ||
+    normalizedPath === '/tests' ||
+    normalizedPath.startsWith('/tests/') ||
+    normalizedPath.startsWith('/.') ||
+    normalizedPath.includes('/.')
   ) {
     return res.status(404).end();
   }
